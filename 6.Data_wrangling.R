@@ -10,8 +10,10 @@ getwd()
 #"C:/Users/A2Hal/projects/Hvd_DS_Course"
 
 #To change working directory use setwd()
-setwd("~/projects")
+#setwd("~/projects")
+setwd("../../projects")
 getwd()
+
 
 #NB: Had to reset home directory to C:/Users/A2Hal to match home directory in unix 
 path.expand("~/")
