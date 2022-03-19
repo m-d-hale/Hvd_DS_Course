@@ -600,7 +600,7 @@ str_view_all(s,pattern)
 #e.g. to only pull the 5s and 6s, use [56]
 str_view(s,"[56]")
 
-#Or can use ranges to deine character class. Using [0-9] is equivalent to using \\d
+#Or can use ranges to define character class. Using [0-9] is equivalent to using \\d
 str_view(s,"[0-9]")
 str_view(s, "\\d")
 
@@ -1086,3 +1086,295 @@ polls_us_election_2016 %>% filter(pollster == "Ipsos" & state == "U.S.") %>%
 #lubridate package in tidyverse helps to deal with dates
 library(lubridate)
 
+set.seed(2)
+dates <- sample(polls_us_election_2016$startdate,10) %>% sort
+dates
+
+#To get numeric days since ref date, day of month, month number and year
+data.frame(date = days(dates),
+           month = month(dates),
+           day = day(dates),
+           year = year(dates))
+
+#To get labels for the months
+month(dates, label=TRUE)
+
+#Parsers that convert strings into dates
+x <- c(20090101, "2009-01-02","2009 01 03","2009-1-4",
+       "2009-1, 5", "Created on 2009 1 6", "200901 !!! 07"
+       )
+ymd(x)
+
+
+#These guys prefer ISO 8601 date format yyyy-mm-dd
+#So that if you sort alphabetically, it orders by date
+
+x <- "09/01/02"
+ymd(x) #generates "2009-01-02" i.e.assumes first entry is year, 2nd month, 3rd day
+mdy(x) #generates "2002-09-01" i.e. assumes first entry is month, second day, 3rd year
+dmy(x) #etc
+dym(x)
+
+#lubridate also good for dealing with times
+Sys.time() #gives current time
+now() #slightly more advanced; can specify time zone
+now("GMT")
+#To see all timezones can use with now() use:
+OlsonNames()
+
+#Lubridate also has functions to extract hours, minutes, seconds
+now() %>% hour()
+now() %>% minute()
+now() %>% second()
+
+#Parsing strings into times...
+x <- c("12:34:56")
+hms(x)
+
+#Parsing out date-time strings
+x <- "Nov/2/2012 12:34:56"
+mdy_hms(x)
+
+
+#TEXT MINING
+
+#tidytext package helps convert free form text into a tidy table
+# unnest_tokens() to extract individual words and other meaningful chunks of text
+
+#Sentiment analysis assigns emotions of a positive/negative score to tokens
+# get_sentiments() to extract sentiments
+
+#Common to use bing, afinn, nrc and loughran for sentiment analysis
+
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(scales)
+set.seed(1)
+
+url <- 'https://drive.google.com/file/d/16wm-2NTKohhcA26w-kaWfhLIGwl_oX95/view'
+trump_tweets <- map(2009:2017, ~sprintf(url, .x)) %>%
+  map_df(jsonlite::fromJSON, simplifyDataFrame = TRUE) %>%
+  filter(!is_retweet & !str_detect(text, '^"')) %>%
+  mutate(created_at = parse_date_time(created_at, orders = "a b! d! H!:M!:S! z!* Y!", tz="EST")) 
+
+#Above didn't work, but output is already in dslabs
+library(dslabs)
+data("trump_tweets")
+head(trump_tweets)
+
+#Get var names
+names(trump_tweets)
+
+?trump_tweets
+
+#Take a look at the text of the tweets (text field in trump_tweets)
+trump_tweets %>% select(text) %>% head
+
+#Which device used to compose and upload each tweet
+trump_tweets %>% count(source) %>% arrange(desc(n))
+
+#Remove the 'twitter for' text to tidy up the data
+trump_tweets %>% 
+  extract(source, "source", "Twitter for (.*)") %>%
+  count(source) 
+
+?extract
+
+#Filter down to just the campaign period
+campaign_tweets <- trump_tweets %>% 
+  extract(source, "source", "Twitter for (.*)") %>%
+  filter(source %in% c("Android", "iPhone") &
+           created_at >= ymd("2015-06-17") & 
+           created_at < ymd("2016-11-08")) %>%
+  filter(!is_retweet) %>%
+  arrange(created_at)
+
+#Visualise where and when tweets were done
+ds_theme_set()
+campaign_tweets %>%
+  mutate(hour = hour(with_tz(created_at, "EST"))) %>%
+  count(source, hour) %>%
+  group_by(source) %>%
+  mutate(percent = n / sum(n)) %>%
+  ungroup %>%
+  ggplot(aes(hour, percent, color = source)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(labels = percent_format()) +
+  labs(x = "Hour of day (EST)",
+       y = "% of tweets",
+       color = "")
+
+#So can see the android peaking in the morning; the iphone peaking in mid afternoon
+
+#To analyse the tweets themselves, use tidytext. Specifically unnest_tokens() function
+library(tidytext)
+
+#The most common tokens will be words, but can also be single characters, ngrams, sentences, lines 
+#or patterns defined by a regex
+
+#A simple example:
+example <- data_frame(line=c(1,2,3,4), text = c("Roses are Red","Violets are blue","Sugar is Sweet",
+                                                "And so are you"))
+example
+#Below then extract each word and puts it in a row alongside the line that it came from (per var in the initial table)
+example %>% unnest_tokens(word,text)
+
+#Having a look at tweet 3008
+i <- 3008
+campaign_tweets$text[i]
+campaign_tweets[i,] %>% unnest_tokens(word,text) %>%
+  select(word)
+
+#The default token 'word' strips out hashtags and @ symbols
+#To get round this, need a regex
+#Below defines a pattern starting with # or @ and is followed by any combination of letters or digits
+
+pattern <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"
+
+campaign_tweets[i,] %>% 
+  unnest_tokens(word, text, token = "regex", pattern = pattern) %>%
+  select(word)
+
+#Remove links to pictures
+campaign_tweets[i,] %>% 
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", ""))  %>%
+  unnest_tokens(word, text, token = "regex", pattern = pattern) %>%
+  select(word)
+
+#Now extract words for all tweets
+tweet_words <- campaign_tweets %>% 
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", ""))  %>%
+  unnest_tokens(word, text, token = "regex", pattern = pattern) 
+
+#Most commonly used words
+tweet_words %>% 
+  count(word) %>%
+  arrange(desc(n))
+
+#the, to, and, a the top ones. Not that helpful. Use stop_words() to filter out the commonly used words
+tweet_words <- campaign_tweets %>% 
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", ""))  %>%
+  unnest_tokens(word, text, token = "regex", pattern = pattern) %>%
+  filter(!word %in% stop_words$word ) 
+
+#Now review top 10 words
+tweet_words %>% 
+  count(word) %>%
+  top_n(10, n) %>%
+  mutate(word = reorder(word, n)) %>%
+  arrange(desc(n))
+
+#Remove those that are just numbers, and remove quotation marks at start of words
+tweet_words <- campaign_tweets %>% 
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", ""))  %>%
+  unnest_tokens(word, text, token = "regex", pattern = pattern) %>%
+  filter(!word %in% stop_words$word &
+           !str_detect(word, "^\\d+$")) %>%
+  mutate(word = str_replace(word, "^'", ""))
+
+#Look at odds ratios. Showing odds words came from android vs odds words came from iphone
+android_iphone_or <- tweet_words %>%
+  count(word, source) %>%
+  spread(source, n, fill = 0) %>%
+  mutate(or = (Android + 0.5) / (sum(Android) - Android + 0.5) / 
+           ( (iPhone + 0.5) / (sum(iPhone) - iPhone + 0.5)))
+android_iphone_or %>% arrange(desc(or))
+android_iphone_or %>% arrange(or)
+
+
+#Get rid of low frequency words
+android_iphone_or %>% filter(Android+iPhone > 100) %>%
+  arrange(desc(or))
+
+android_iphone_or %>% filter(Android+iPhone > 100) %>%
+  arrange(or)
+
+
+#So can see some words more often associated with the android rather than iphone
+
+#Sentiment analysis then assigns words to one or more sentiments.
+#Misses context dependent sentiments such as sarcasm, but can still prove insightful
+
+#tidytext package includes several lexicons in the sentiments object
+
+sentiments
+
+#bing lexicon divides words into positive and negative
+get_sentiments("bing")
+
+#afinn lecivon assigns a score between -5 (most negative) and 5 (most positive)
+get_sentiments("afinn")
+
+#loughran and nrc lexicons provide several different sentiments:
+get_sentiments("loughran") %>% count(sentiment)
+get_sentiments("nrc") %>% count(sentiment)
+
+?sentiments
+
+
+#Back to Trump tweets...
+nrc <- get_sentiments("nrc") %>%
+  select(word, sentiment)
+
+#Exmaple: Join on sentiments to Trump tweets data. Pick 10 at random...
+tweet_words %>% inner_join(nrc, by="word") %>% select(source,word,sentiment) %>% sample_n(10)
+
+#Analyse the full data
+sentiment_counts <- tweet_words %>%
+  left_join(nrc, by = "word") %>%
+  count(source, sentiment) %>%
+  spread(source, n) %>%
+  mutate(sentiment = replace_na(sentiment, replace = "none"))
+sentiment_counts
+
+#normalise for the number of tweets - get odds ratios
+
+tweet_words %>% group_by(source) %>% summarize(n = n())
+
+sentiment_counts %>%
+  mutate(Android = Android / (sum(Android) - Android) , 
+         iPhone = iPhone / (sum(iPhone) - iPhone), 
+         or = Android/iPhone) %>%
+  arrange(desc(or))
+
+#Now checking if results are statistically significant. Calc CI around the logged odds ratio
+library(broom)
+log_or <- sentiment_counts %>%
+  mutate( log_or = log( (Android / (sum(Android) - Android)) / (iPhone / (sum(iPhone) - iPhone))),
+          se = sqrt( 1/Android + 1/(sum(Android) - Android) + 1/iPhone + 1/(sum(iPhone) - iPhone)),
+          conf.low = log_or - qnorm(0.975)*se,
+          conf.high = log_or + qnorm(0.975)*se) %>%
+  arrange(desc(log_or))
+
+log_or
+
+#Plot the CIs
+log_or %>%
+  mutate(sentiment = reorder(sentiment, log_or),) %>%
+  ggplot(aes(x = sentiment, ymin = conf.low, ymax = conf.high)) +
+  geom_errorbar() +
+  geom_point(aes(sentiment, log_or)) +
+  ylab("Log odds ratio for association between Android and sentiment") +
+  coord_flip() 
+
+#Shows clearly distrust, anger, negative, sadness emotions are stronger from the android phone
+#and more than would be expected by chance
+
+
+#Going back to the words themselves, and seeing which ones are driving the sentiment
+android_iphone_or %>% inner_join(nrc) %>%
+  filter(sentiment == "disgust" & Android + iPhone > 10) %>%
+  arrange(desc(or))
+
+android_iphone_or %>% inner_join(nrc, by = "word") %>%
+  mutate(sentiment = factor(sentiment, levels = log_or$sentiment)) %>%
+  mutate(log_or = log(or)) %>%
+  filter(Android + iPhone > 10 & abs(log_or)>1) %>%
+  mutate(word = reorder(word, log_or)) %>%
+  ggplot(aes(word, log_or, fill = log_or < 0)) +
+  facet_wrap(~sentiment, scales = "free_x", nrow = 2) + 
+  geom_bar(stat="identity", show.legend = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 

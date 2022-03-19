@@ -279,3 +279,188 @@ temp <- str_extract_all(polls$dates,"\\d+\\s[a-zA-Z]{3,5}")
 end_date <- sapply(temp, function(x) x[length(x)]) # take last element (handles polls that cross month boundaries)
 end_date
 
+
+#SECTION 4
+
+library(dslabs)
+library(lubridate)
+options(digits = 3)    # 3 significant digits
+
+
+data(brexit_polls)
+str(brexit_polls)
+
+#Number of polls starting in April
+brexit_polls %>% mutate(month = month(startdate)) %>% group_by(month) %>% summarize(n=n())
+
+#Number of polls ending in week of 2016-06-12
+summary_brex <- brexit_polls %>% mutate(endweek = round_date(enddate,'week')) %>% group_by(endweek) %>% summarize(n=n())
+
+?round_date
+
+#Most popular weekday
+brexit_polls %>% mutate(weekday = weekdays(enddate)) %>% group_by(weekday) %>% summarize(n=n())
+
+
+
+data(movielens)
+str(movielens)
+
+movielens %>% mutate(reviewdate = as_datetime(timestamp)) %>% mutate(reviewyr = year(reviewdate)) %>%
+  group_by(reviewyr) %>% summarize(n=n()) %>% arrange(desc(n))
+
+movielens %>% mutate(reviewdate = as_datetime(timestamp)) %>% mutate(reviewhr = hour(reviewdate)) %>%
+  group_by(reviewhr) %>% summarize(n=n()) %>% arrange(desc(n))
+
+
+?as_datetime
+?year
+
+
+#Part 2
+
+library(tidyverse)
+library(gutenbergr)
+library(tidytext)
+options(digits = 3)
+
+gutenberg_metadata
+
+pattern <- "Pride and Prejudice"
+str_detect(gutenberg_metadata$title,pattern)
+
+IDs <- gutenberg_metadata %>% mutate(Match = str_detect(title,pattern)) %>% filter(Match == TRUE) 
+
+TmpIDs <- gutenberg_works() %>% mutate(Match = str_detect(title,pattern)) %>% filter(Match == TRUE) 
+
+?gutenberg_works
+
+
+words <- gutenberg_download(1342) %>% unnest_tokens(word,text)
+
+#strip out standard words
+words_small <- words %>% filter(!word %in% stop_words$word )
+
+#strip out any containing a digit
+pattern <- "\\d"
+words_small2 <- words_small %>% mutate(Digit = str_detect(word, pattern)) %>% filter(Digit==FALSE)
+
+
+words_summ <- words_small2 %>% group_by(word) %>% summarize(n=n()) %>% filter(n >= 100)
+
+words_small2 %>% group_by(word) %>% summarize(n=n()) %>% arrange(desc(n)) %>% head
+
+#Q12
+afinn <- get_sentiments("afinn")
+
+words_small3 <- words_small2 %>% inner_join(afinn,by="word") %>% select(c("gutenberg_id","word","value"))
+
+#positive sentiments
+words_small3 %>% mutate(pos = ifelse(value>0 , 1 , 0 )) %>% summarize(pct = sum(pos)/n())
+  
+
+words_small3 %>% filter(value == 4) %>% summarize(n=n())
+
+
+
+#Comprehensive Assessment - Puerto Rico Hurricane
+
+library(tidyverse)
+library(pdftools)
+options(digits = 3)    # report 3 significant digits
+
+fn <- system.file("extdata", "RD-Mortality-Report_2015-18-180531.pdf", package="dslabs")
+system("cmd.exe", input = paste("start", fn))
+
+txt <- pdf_text(fn)
+head(txt)
+
+#3.
+str(txt)
+
+Pg_9 <- txt[9] 
+x <- str_split(Pg_9,"\n")
+head(x)
+
+#Turn list of 1 into character string by selecting first entry of x
+s <- x[[1]]
+s
+
+#Get rid of leading/trailing blanks
+s <- str_trim(s)
+
+#locate the index of the header row
+header_index <- min(str_which(s,"2015"))
+
+header <- s[header_index]
+pattern <- "\\s+"  #looking for one or more spaces as the delimiter
+split_head <- str_split(header,pattern,simplify=TRUE) #simplify translates from list to character vector
+
+
+month <- split_head[,1]
+month
+
+header <-split_head[,2:5]
+header
+
+head_alt <- paste("Yr", header, sep = "_")
+head_alt
+
+tail_index <- str_which(s,"Total")
+tail_index
+
+pattern <- "\\d+"
+n <- str_count(s,pattern)
+n == 1
+
+sum(n==1)
+
+#Remove everything before head index, and everything after tail index
+
+s %>% filter()
+
+s1 <- s[(header_index + 1):(tail_index -1)] 
+pattern <- "\\d+"
+n1 <- str_count(s1,pattern)
+s2 <- s1[!n1 == 1]
+
+#Remove anything that isn't a digit or space. ^ inside square brackets means not like...
+s3 <- str_remove_all(s2,"[^\\d\\s]")
+
+#Turn into data frame and add col names
+daynme <- "day"
+ColNames <- c(daynme, head_alt)
+
+s <- str_split_fixed(s3, "\\s+", n = 6)[,1:5]
+
+s1 <- s %>% as.data.frame() %>% setNames(ColNames) %>% sapply(as.numeric)
+
+newcol <- rep("SEP", nrow(s1))
+s1 <- cbind(newcol,s1)
+
+tab <- as.data.frame(s1) 
+
+is.data.frame(tab)
+
+tab %>% mutate(Yr_2015_num = as.numeric(Yr_2015)) %>% summarize(mean_2015 = mean(Yr_2015_num))
+tab %>% mutate(Yr_2016_num = as.numeric(Yr_2016)) %>% summarize(mean_2016 = mean(Yr_2016_num))
+
+tab2 <- tab %>% mutate(Yr_2017_num = as.numeric(Yr_2017), day_num = as.numeric(day)) %>% 
+  mutate(Grp1 = ifelse(day_num>=1 & day_num <=19,1,0) )
+
+tab2 %>% group_by(Grp1) %>% summarize(mean = mean(Yr_2017_num))
+
+
+tab <- tab %>% gather(year, deaths, -day) %>%
+  mutate(deaths = as.numeric(deaths))
+tab
+
+library(ggplot2)
+tab %>% filter(year != "newcol") %>% ggplot(aes(x=as.numeric(day),y=deaths,color=year)) +
+  geom_line()
+
+
+
+
+
+
